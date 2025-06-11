@@ -29,7 +29,11 @@ private:
     //==============================================================================
     // Your private member variables go here...
     juce::Random random;
-    std::vector<float> pinkNoiseGenerator(int numSamples, int numRows);
+    std::vector<std::vector<float>> matrix;
+    std::vector<float> pinkBuffer;
+    void pinkNoiseGenerator(int numSamples, int numRows);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainComponent)
+
+    const int NUMROWS = 16;
 };

@@ -42,6 +42,12 @@ void MainComponent::prepareToPlay (int samplesPerBlockExpected, double sampleRat
     message << " samplesPerBlockExpected = " << samplesPerBlockExpected << "\n";
     message << " sampleRate = " << sampleRate;
     juce::Logger::getCurrentLogger()->writeToLog(message);
+
+    matrix.resize(NUMROWS);
+    for (auto& row: matrix)
+        row.resize(samplesPerBlockExpected, 0.0f);
+    
+    pinkBuffer.resize(samplesPerBlockExpected);
 }
 
 void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& bufferToFill)
@@ -50,19 +56,19 @@ void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& buffe
 
     // For more details, see the help for AudioProcessor::getNextAudioBlock()
 
-    // Right now we are not producing any data, in which case we need to clear the buffer
-    // (to prevent the output of random noise)
     for (auto channel = 0; channel < bufferToFill.buffer->getNumChannels(); channel++)
     {
         auto* buffer = bufferToFill.buffer->getWritePointer(channel, bufferToFill.startSample);
 
-        auto pink = pinkNoiseGenerator(bufferToFill.numSamples, 16);
+        pinkNoiseGenerator(bufferToFill.numSamples, 16);
 
-        for (float&x : pink) {
-            x = x * 0.25f - 0.125f;
-        }
         
-        std::copy(pink.begin(), pink.end(), buffer);
+        for (int i = 0; i < bufferToFill.numSamples; ++i) {
+            pinkBuffer[i] = pinkBuffer[i] * 0.25f - 0.125f;
+        }
+
+        // Copy only the valid number of samples
+        std::copy(pinkBuffer.begin(), pinkBuffer.begin() + bufferToFill.numSamples, buffer);
     }
 }
 
@@ -91,37 +97,36 @@ void MainComponent::resized()
     // update their positions.
 }
 
-std::vector<float> MainComponent::pinkNoiseGenerator (int numSamples, int numRows) {
-    std::vector<std::vector<float>> matrix(numRows, std::vector<float>(numSamples, 0.0));
-
+void MainComponent::pinkNoiseGenerator (int numSamples, int numRows) {
     for (auto sample = 0; sample < numSamples; ++sample)
         matrix[0][sample] = random.nextFloat();
 
     for (auto row = 1; row < numRows; ++row) {
-        int stepSize = std::pow(2, row); // Alternative: 1 << row
+        int stepSize = 1 << row;
         int numSteps = static_cast<int>(std::ceil(static_cast<float>(numSamples) / stepSize));
         std::vector<float> randomValues(numSteps, 0.0);
-        for (auto sample = 0; sample < numSteps; ++sample)
-            randomValues[sample] = random.nextFloat();
-        for (auto i = 0; i < numSteps; ++i)
-            for (auto j = i * stepSize; j < std::min((i + 1) * stepSize, numSamples); ++j)
-                matrix[row][j] = randomValues[i];
-    }
-
-    std::vector<float> pink(numSamples, 0.0);
-    for (auto i = 0; i < numSamples; ++i)
-        for (int row = 0; row < numRows; ++row)
-            pink[i] += matrix[row][i];
-
-    float max_abs = 0.0f;
-    for (float x : pink) {
-        if (std::abs(x) > max_abs) max_abs = std::abs(x);
-    }
-    if (max_abs > 0.0f) {
-        for (float& x: pink) {
-            x /= max_abs;
+        for (int i = 0; i < numSteps; ++i) {
+            float value = random.nextFloat();
+            int start = i * stepSize;
+            int end = std::min((i + 1) * stepSize, numSamples);
+            for (int j = start; j < end; ++j)
+                matrix[row][j] = value;
         }
     }
 
-    return pink;
+    // Clear and accumulate pinkBuffer
+    std::fill(pinkBuffer.begin(), pinkBuffer.begin() + numSamples, 0.0f);
+
+    for (auto i = 0; i < numSamples; ++i)
+        for (int row = 0; row < numRows; ++row)
+            pinkBuffer[i] += matrix[row][i];
+
+    float max_abs = 0.0f;
+    for (int i = 0; i < numSamples; ++i)
+        max_abs = std::max(max_abs, std::abs(pinkBuffer[i]));
+
+    if (max_abs > 0.0f) {
+        for (int i = 0; i < numSamples; ++i)
+            pinkBuffer[i] /= max_abs;
+    }
 }
